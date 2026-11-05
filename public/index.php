@@ -2,7 +2,7 @@
 
 require_once __DIR__ . '/cors.php';
 
-$dataFile = __DIR__ . '/../data/messages.json';
+$dataFile = __DIR__ . '/../../data/messages.json';
 $messages = [];
 
 if (is_file($dataFile)) {

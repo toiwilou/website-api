@@ -3,7 +3,7 @@
 require_once __DIR__ . '/cors.php';
  
 // Le fichier de données est stocké HORS de public_html (non accessible depuis le web)
-$dir  = __DIR__ . '/../data';
+$dir  = __DIR__ . '/../../data';
 $file = $dir . '/messages.json';
 if (!is_dir($dir)) mkdir($dir, 0750, true);
  
