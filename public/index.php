@@ -15,7 +15,9 @@ if (is_file($dataFile)) {
     }
 }
 
-// Les plus récents en premier
+/**
+ * Les plus récents en premier
+ */ 
 $messages = array_reverse($messages);
 $total = count($messages);
 
