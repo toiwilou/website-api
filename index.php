@@ -1,80 +1,102 @@
 <?php
 
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
-header('Content-Type: application/json; charset=utf-8');
+require_once __DIR__ . '/cors.php';
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(204);
-    exit;
+$dataFile = __DIR__ . '/../data/messages.json';
+$messages = [];
+
+if (is_file($dataFile)) {
+    $handle = fopen($dataFile, 'r');
+    if ($handle) {
+        flock($handle, LOCK_SH);
+        $messages = json_decode(stream_get_contents($handle), true) ?: [];
+        flock($handle, LOCK_UN);
+        fclose($handle);
+    }
 }
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
+// Les plus récents en premier
+$messages = array_reverse($messages);
+$total = count($messages);
 
-    echo json_encode([
-        'ok' => false,
-        'error' => 'Méthode non autorisée'
-    ]);
-
-    exit;
-} else if ($_SERVER['REQUEST_METHOD'] === 'GET') include 'lister.php';
- 
-// Le fichier de données est stocké HORS de public_html (non accessible depuis le web)
-$dir  = __DIR__ . '/../data';
-$file = $dir . '/messages.json';
-if (!is_dir($dir)) mkdir($dir, 0750, true);
- 
-$fp = fopen($file, 'c+');
-if (!$fp) {
-    http_response_code(500);
-    exit(json_encode(['error' => 'fichier inaccessible']));
+function e(?string $value): string
+{
+    return htmlspecialchars((string)($value ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
- 
-$isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
- 
-// Verrou : exclusif pour écrire, partagé pour lire (évite les écritures simultanées)
-flock($fp, $isPost ? LOCK_EX : LOCK_SH);
-$messages = json_decode(stream_get_contents($fp), true) ?: [];
- 
-if ($isPost) {
-    $data = json_decode(
-        file_get_contents('php://input'),
-        true
-    );
 
-    $email = $data['email'] ?? null;
-    $gender = $data['gender'] ?? null;
-    $message = $data['message'] ?? null;
-    $subject = $data['subject'] ?? null;
-    $company = $data['company'] ?? null;
-    $lastname = $data['lastname'] ?? null;
-    $firstname = $data['firstname'] ?? null;
-    $isCompany = $data['is_company'] ?? null;
- 
-    $messages[] = [
-        'id' => count($messages) + 1,
-        'email' => $data['email'],
-        'gender' => $data['gender'],
-        'message' => $data['message'],
-        'subject' => $data['subject'],
-        'company' => $data['company'],
-        'lastname' => $data['lastname'],
-        'firstname' => $data['firstname'],
-        'isCompany' => $data['is_company'],
-        'date' => date('c')
-    ];
- 
-    // On réécrit tout le fichier
-    ftruncate($fp, 0);
-    rewind($fp);
-    fwrite($fp, json_encode($messages, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-    fflush($fp);
-    http_response_code(201);
+function formatDate(?string $iso): string
+{
+    if (!$iso) return '';
+    try {
+        return (new DateTime($iso))->format('d/m/Y à H:i');
+    } catch (Exception $ex) {
+        return e($iso);
+    }
 }
- 
-flock($fp, LOCK_UN);
-fclose($fp);
 
-echo json_encode(['ok' => false], JSON_UNESCAPED_UNICODE);
+header('Content-Type: text/html; charset=utf-8');
+?>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Messages</title>
+    <link rel="stylesheet" href="index.css">
+</head>
+<body>
+    <main class="container">
+        <header class="page-header">
+            <h1>Messages reçus <span class="badge"><?= $total ?></span></h1>
+            <?php if ($total > 0): ?>
+                <input type="search" id="search" placeholder="Rechercher (nom, email, sujet…)" autocomplete="off">
+            <?php endif; ?>
+        </header>
+
+        <?php if ($total === 0): ?>
+            <div class="empty">
+                <p class="empty-title">Aucun message pour le moment</p>
+                <p>Les messages envoyés depuis le formulaire apparaîtront ici.</p>
+            </div>
+        <?php else: ?>
+            <div id="list" class="list">
+                <?php foreach ($messages as $m): ?>
+                    <?php
+                        $fullName = trim(e($m['gender'] ?? '') . ' ' . e($m['firstname'] ?? '') . ' ' . e($m['lastname'] ?? ''));
+                        $isCompany = !empty($m['isCompany']);
+                    ?>
+                    <article class="card">
+                        <div class="card-head">
+                            <h2><?= e($m['subject'] ?: '(Sans sujet)') ?></h2>
+                            <span class="date"><?= formatDate($m['date'] ?? null) ?></span>
+                        </div>
+
+                        <p class="from">
+                            <strong><?= $fullName !== '' ? $fullName : 'Anonyme' ?></strong>
+                            <?php if ($isCompany): ?>
+                                <span class="tag">Entreprise<?= !empty($m['company']) ? ' : ' . e($m['company']) : '' ?></span>
+                            <?php else: ?>
+                                <span class="tag tag-perso">Particulier</span>
+                            <?php endif; ?>
+                        </p>
+
+                        <?php if (!empty($m['email'])): ?>
+                            <p class="email"><a href="mailto:<?= e($m['email']) ?>"><?= e($m['email']) ?></a></p>
+                        <?php endif; ?>
+
+                        <p class="message"><?= nl2br(e($m['message'] ?? '')) ?></p>
+                        <p class="id">#<?= (int)($m['id'] ?? 0) ?></p>
+                    </article>
+                <?php endforeach; ?>
+            </div>
+
+            <p id="no-result" class="empty" hidden>Aucun résultat pour cette recherche.</p>
+        <?php endif; ?>
+    </main>
+
+    <?php if ($total > 0): ?>
+        <script src="index.js"></script>
+    <?php endif; ?>
+</body>
+</html>
